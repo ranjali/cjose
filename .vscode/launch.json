@@ -1,0 +1,31 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(lldb) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/test/.libs/check_cjose",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/test",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+
+            // Check this https://github.com/microsoft/vscode-cpptools/issues/4125
+            // But still not working ...
+            "setupCommands": [
+                { "text": "b malloc_error_break", "description": "aaa", "ignoreFailures": true },
+                { "text": "br s -F malloc_error_break", "description": "aaa", "ignoreFailures": true },
+                { "text": "br set -n malloc_error_break", "description": "bbb", "ignoreFailures": true }
+            ],
+            // "customLaunchSetupCommands": [
+            //     { "text": "br set -n malloc_error_break", "description": "run target", "ignoreFailures": true }
+            // ]
+        }
+    ]
+}
