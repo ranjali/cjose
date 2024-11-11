@@ -299,42 +299,50 @@ static bool _cjose_jws_build_dig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *j
     params[1] = OSSL_PARAM_construct_end();
 
     mac = EVP_MAC_fetch(NULL, "HMAC", NULL); // Fetch the HMAC algorithm
-    if (mac == NULL) {
+    if (mac == NULL)
+    {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         goto _cjose_jws_build_dig_hmac_sha_cleanup;
     }
 
     // Initialize the context
     mac_ctx = EVP_MAC_CTX_new(mac);
-    if (mac_ctx == NULL) {
+    if (mac_ctx == NULL)
+    {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         goto _cjose_jws_build_dig_hmac_sha_cleanup;
     }
 
     // Initialize the HMAC context with the parameters (key + digest algorithm)
-    if (EVP_MAC_init(mac_ctx, jwk->keydata, jwk->keysize / 8, params) <= 0) {
+    if (EVP_MAC_init(mac_ctx, jwk->keydata, jwk->keysize / 8, params) <= 0)
+    {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         goto _cjose_jws_build_dig_hmac_sha_cleanup;
     }
 
     // Perform HMAC updates with the header, separator, and data
-    if (EVP_MAC_update(mac_ctx, (const unsigned char *)jws->hdr_b64u, jws->hdr_b64u_len) <= 0) {
+    if (EVP_MAC_update(mac_ctx, (const unsigned char *)jws->hdr_b64u, jws->hdr_b64u_len) <= 0)
+    {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         goto _cjose_jws_build_dig_hmac_sha_cleanup;
     }
 
-    if (EVP_MAC_update(mac_ctx, (const unsigned char *)".", 1) <= 0) {
+    if (EVP_MAC_update(mac_ctx, (const unsigned char *)".", 1) <= 0)
+    {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         goto _cjose_jws_build_dig_hmac_sha_cleanup;
     }
 
-    if (EVP_MAC_update(mac_ctx, (const unsigned char *)jws->dat_b64u, jws->dat_b64u_len) <= 0) {
+    if (EVP_MAC_update(mac_ctx, (const unsigned char *)jws->dat_b64u, jws->dat_b64u_len) <= 0)
+    {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         goto _cjose_jws_build_dig_hmac_sha_cleanup;
     }
 
     // Finalize the HMAC and get the result
-    if (EVP_MAC_final(mac_ctx, jws->dig, &jws->dig_len, jws->dig_len) <= 0) {
+    // TODO: should check length again here
+    if (EVP_MAC_final(mac_ctx, jws->dig, &jws->dig_len, jws->dig_len) <= 0)
+    {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         goto _cjose_jws_build_dig_hmac_sha_cleanup;
     }
@@ -343,13 +351,11 @@ static bool _cjose_jws_build_dig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *j
     retval = true;
 
 _cjose_jws_build_dig_hmac_sha_cleanup:
-    if (mac_ctx != NULL) {
+    if (mac_ctx != NULL)
         EVP_MAC_CTX_free(mac_ctx);
-    }
 
-    if (mac != NULL) {
+    if (mac != NULL)
         EVP_MAC_free(mac);
-    }
     
 #else // CJOSE_OPENSSL_3X
 
