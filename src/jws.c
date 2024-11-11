@@ -239,10 +239,13 @@ _cjose_jws_build_dig_sha_cleanup:
 static bool _cjose_jws_build_dig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err)
 {
     bool retval = false;
-    // HMAC_CTX *ctx = NULL;
+#if defined(CJOSE_OPENSSL_3X)
     EVP_MAC *mac = NULL;
     EVP_MAC_CTX *mac_ctx = NULL;
     OSSL_PARAM params[2];
+#else
+    HMAC_CTX *ctx = NULL;
+#endif
 
     // make sure we have an alg header
     json_t *alg_obj = json_object_get(jws->hdr, CJOSE_HDR_ALG);
@@ -283,63 +286,7 @@ static bool _cjose_jws_build_dig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *j
         goto _cjose_jws_build_dig_hmac_sha_cleanup;
     }
 
-// instantiate and initialize a new mac digest context
-// #if defined(CJOSE_OPENSSL_11X)
-//     ctx = HMAC_CTX_new();
-// #else
-//     ctx = cjose_get_alloc()(sizeof(HMAC_CTX));
-// #endif
-//     if (NULL == ctx)
-//     {
-//         CJOSE_ERROR(err, CJOSE_ERR_NO_MEMORY);
-//         goto _cjose_jws_build_dig_hmac_sha_cleanup;
-//     }
-
-// #if !defined(CJOSE_OPENSSL_11X)
-//     HMAC_CTX_init(ctx);
-// #endif
-
-//     // create digest as DIGEST(B64U(HEADER).B64U(DATA))
-//     if (HMAC_Init_ex(ctx, jwk->keydata, jwk->keysize / 8, digest_alg, NULL) != 1)
-//     {
-//         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
-//         goto _cjose_jws_build_dig_hmac_sha_cleanup;
-//     }
-//     if (HMAC_Update(ctx, (const unsigned char *)jws->hdr_b64u, jws->hdr_b64u_len) != 1)
-//     {
-//         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
-//         goto _cjose_jws_build_dig_hmac_sha_cleanup;
-//     }
-//     if (HMAC_Update(ctx, (const unsigned char *)".", 1) != 1)
-//     {
-//         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
-//         goto _cjose_jws_build_dig_hmac_sha_cleanup;
-//     }
-//     if (HMAC_Update(ctx, (const unsigned char *)jws->dat_b64u, jws->dat_b64u_len) != 1)
-//     {
-//         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
-//         goto _cjose_jws_build_dig_hmac_sha_cleanup;
-//     }
-//     if (HMAC_Final(ctx, jws->dig, NULL) != 1)
-//     {
-//         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
-//         goto _cjose_jws_build_dig_hmac_sha_cleanup;
-//     }
-
-//     // if we got this far - success
-//     retval = true;
-
-// _cjose_jws_build_dig_hmac_sha_cleanup:
-//     if (NULL != ctx)
-//     {
-// #if defined(CJOSE_OPENSSL_11X)
-//         HMAC_CTX_free(ctx);
-// #else
-//         HMAC_CTX_cleanup(ctx);
-//         cjose_get_dealloc()(ctx);
-// #endif
-//     }
-
+#if defined(CJOSE_OPENSSL_3X)
 
     // Define the parameters: first for the key, second for the digest algorithm
     if (strcmp(alg, CJOSE_HDR_ALG_HS256) == 0)
@@ -403,6 +350,67 @@ static bool _cjose_jws_build_dig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *j
     if (mac != NULL) {
         EVP_MAC_free(mac);
     }
+    
+#else // CJOSE_OPENSSL_3X
+
+    // instantiate and initialize a new mac digest context
+#if defined(CJOSE_OPENSSL_11X)
+    ctx = HMAC_CTX_new();
+#else
+    ctx = cjose_get_alloc()(sizeof(HMAC_CTX));
+#endif
+    if (NULL == ctx)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_NO_MEMORY);
+        goto _cjose_jws_build_dig_hmac_sha_cleanup;
+    }
+
+#if !defined(CJOSE_OPENSSL_11X)
+    HMAC_CTX_init(ctx);
+#endif
+
+    // create digest as DIGEST(B64U(HEADER).B64U(DATA))
+    if (HMAC_Init_ex(ctx, jwk->keydata, jwk->keysize / 8, digest_alg, NULL) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_build_dig_hmac_sha_cleanup;
+    }
+    if (HMAC_Update(ctx, (const unsigned char *)jws->hdr_b64u, jws->hdr_b64u_len) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_build_dig_hmac_sha_cleanup;
+    }
+    if (HMAC_Update(ctx, (const unsigned char *)".", 1) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_build_dig_hmac_sha_cleanup;
+    }
+    if (HMAC_Update(ctx, (const unsigned char *)jws->dat_b64u, jws->dat_b64u_len) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_build_dig_hmac_sha_cleanup;
+    }
+    if (HMAC_Final(ctx, jws->dig, NULL) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_build_dig_hmac_sha_cleanup;
+    }
+
+    // if we got this far - success
+    retval = true;
+
+_cjose_jws_build_dig_hmac_sha_cleanup:
+    if (NULL != ctx)
+    {
+#if defined(CJOSE_OPENSSL_11X)
+        HMAC_CTX_free(ctx);
+#else
+        HMAC_CTX_cleanup(ctx);
+        cjose_get_dealloc()(ctx);
+#endif
+    }
+
+#endif // CJOSE_OPENSSL_3X
 
     return retval;
 }
