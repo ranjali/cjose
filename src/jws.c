@@ -342,7 +342,7 @@ static bool _cjose_jws_build_dig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *j
     // Success
     retval = true;
 
-    _cjose_jws_build_dig_hmac_sha_cleanup:
+_cjose_jws_build_dig_hmac_sha_cleanup:
     if (mac_ctx != NULL) {
         EVP_MAC_CTX_free(mac_ctx);
     }
