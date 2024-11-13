@@ -25,6 +25,7 @@
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <openssl/core_names.h>
 
 // internal data structures
 
@@ -64,6 +65,26 @@ void _cjose_jwk_rsa_get(RSA *rsa, BIGNUM **rsa_n, BIGNUM **rsa_e, BIGNUM **rsa_d
 #endif
 }
 
+bool _cjose_jwk_rsa_get2(EVP_PKEY *pkey, BIGNUM **rsa_n, BIGNUM **rsa_e, BIGNUM **rsa_d)
+{
+    if (pkey == NULL || EVP_PKEY_base_id(pkey) != EVP_PKEY_RSA)
+        return false;
+
+    // Retrieve modulus (n)
+    if (rsa_n && EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, rsa_n) != 1)
+        return false; // Failed to get modulus
+
+    // Retrieve public exponent (e)
+    if (rsa_e && EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, rsa_e) != 1)
+        return false; // Failed to get public exponent
+
+    // Retrieve private exponent (d), only if pkey has the private key
+    if (rsa_d && EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_D, rsa_d) != 1)
+        return false; // Failed to get private exponent (d may be NULL for public keys)
+
+    return true;
+}
+
 bool _cjose_jwk_rsa_set(RSA *rsa, uint8_t *n, size_t n_len, uint8_t *e, size_t e_len, uint8_t *d, size_t d_len)
 {
     BIGNUM *rsa_n = NULL, *rsa_e = NULL, *rsa_d = NULL;
@@ -99,6 +120,20 @@ void _cjose_jwk_rsa_get_factors(RSA *rsa, BIGNUM **p, BIGNUM **q)
 #endif
 }
 
+bool _cjose_jwk_rsa_get_factors2(EVP_PKEY *pkey, BIGNUM **p, BIGNUM **q)
+{
+    if (pkey == NULL || EVP_PKEY_base_id(pkey) != EVP_PKEY_RSA)
+        return false;
+
+    if (p && EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_FACTOR1, p) != 1)
+        return false;
+
+    if (q && EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_FACTOR2, q) != 1)
+        return false;
+
+    return true;
+}
+
 void _cjose_jwk_rsa_set_factors(RSA *rsa, uint8_t *p, size_t p_len, uint8_t *q, size_t q_len)
 {
     BIGNUM *rsa_p = NULL, *rsa_q = NULL;
@@ -127,6 +162,23 @@ void _cjose_jwk_rsa_get_crt(RSA *rsa, BIGNUM **dmp1, BIGNUM **dmq1, BIGNUM **iqm
 #endif
 }
 
+bool _cjose_jwk_rsa_get_crt2(EVP_PKEY *pkey, BIGNUM **dmp1, BIGNUM **dmq1, BIGNUM **iqmp)
+{
+    if (pkey == NULL || EVP_PKEY_base_id(pkey) != EVP_PKEY_RSA)
+        return false;
+
+    if (dmp1 && EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_EXPONENT1, dmp1) != 1)
+        return false;
+
+    if (dmq1 && EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_EXPONENT2, dmq1) != 1)
+        return false;
+
+    if (iqmp && EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_COEFFICIENT1, iqmp) != 1)
+        return false;
+
+    return true;
+}
+
 void _cjose_jwk_rsa_set_crt(
     RSA *rsa, uint8_t *dmp1, size_t dmp1_len, uint8_t *dmq1, size_t dmq1_len, uint8_t *iqmp, size_t iqmp_len)
 {
@@ -146,6 +198,39 @@ void _cjose_jwk_rsa_set_crt(
     rsa->dmq1 = rsa_dmq1;
     rsa->iqmp = rsa_iqmp;
 #endif
+}
+
+bool _cjose_jwk_rsa_set_crt2(EVP_PKEY *pkey, uint8_t *dmp1, size_t dmp1_len, uint8_t *dmq1, size_t dmq1_len, uint8_t *iqmp, size_t iqmp_len)
+{
+    bool retval = false;
+    BIGNUM *rsa_dmp1 = NULL, *rsa_dmq1 = NULL, *rsa_iqmp = NULL;
+
+    if (dmp1 && dmp1_len > 0)
+        rsa_dmp1 = BN_bin2bn(dmp1, dmp1_len, NULL);
+    if (dmq1 && dmq1_len > 0)
+        rsa_dmq1 = BN_bin2bn(dmq1, dmq1_len, NULL);
+    if (iqmp && iqmp_len > 0)
+        rsa_iqmp = BN_bin2bn(iqmp, iqmp_len, NULL);
+
+    // Set the parameters in the EVP_PKEY object
+    if (!EVP_PKEY_set_bn_param(pkey, OSSL_PKEY_PARAM_RSA_EXPONENT1, rsa_dmp1))
+        goto _cjose_jwk_rsa_set_factors2_cleanup;
+    if (!EVP_PKEY_set_bn_param(pkey, OSSL_PKEY_PARAM_RSA_EXPONENT2, rsa_dmq1))
+        goto _cjose_jwk_rsa_set_factors2_cleanup;
+    if (!EVP_PKEY_set_bn_param(pkey, OSSL_PKEY_PARAM_RSA_COEFFICIENT1, rsa_iqmp))
+        goto _cjose_jwk_rsa_set_factors2_cleanup;
+
+    retval = true;
+
+_cjose_jwk_rsa_set_factors2_cleanup:
+    if (!retval && NULL != rsa_dmp1)
+        BN_free(rsa_dmp1);
+    if (!retval && NULL != rsa_dmq1)
+        BN_free(rsa_dmq1);
+    if (!retval && NULL != rsa_iqmp)
+        BN_free(rsa_iqmp);
+
+    return retval;
 }
 
 // interface functions -- Generic
@@ -1023,6 +1108,26 @@ static bool _RSA_private_fields(const cjose_jwk_t *jwk, json_t *json, cjose_err 
 
 static const key_fntable RSA_FNTABLE = { _RSA_free, _RSA_public_fields, _RSA_private_fields };
 
+
+#if defined(CJOSE_OPENSSL_3X)
+static inline cjose_jwk_t *_RSA_new(EVP_PKEY *pkey, cjose_err *err)
+{
+    cjose_jwk_t *jwk = cjose_get_alloc()(sizeof(cjose_jwk_t));
+    if (!jwk)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_NO_MEMORY);
+        return NULL;
+    }
+    memset(jwk, 0, sizeof(cjose_jwk_t));
+    jwk->retained = 1;
+    jwk->kty = CJOSE_JWK_KTY_RSA;
+    jwk->keysize = EVP_PKEY_size(pkey) * 8;
+    jwk->keydata = pkey;
+    jwk->fns = &RSA_FNTABLE;
+
+    return jwk;
+}
+#else // CJOSE_OPENSSL_3X
 static inline cjose_jwk_t *_RSA_new(RSA *rsa, cjose_err *err)
 {
     cjose_jwk_t *jwk = cjose_get_alloc()(sizeof(cjose_jwk_t));
@@ -1040,15 +1145,25 @@ static inline cjose_jwk_t *_RSA_new(RSA *rsa, cjose_err *err)
 
     return jwk;
 }
+#endif // CJOSE_OPENSSL_3X
 
 static void _RSA_free(cjose_jwk_t *jwk)
 {
+#if defined(CJOSE_OPENSSL_3X)
+    EVP_PKEY *rsa = (EVP_PKEY *)jwk->keydata;
+    jwk->keydata = NULL;
+    if (rsa)
+    {
+        EVP_PKEY_free(rsa);
+    }
+#else // CJOSE_OPENSSL_3X
     RSA *rsa = (RSA *)jwk->keydata;
     jwk->keydata = NULL;
     if (rsa)
     {
         RSA_free(rsa);
     }
+#endif // CJOSE_OPENSSL_3X
     cjose_get_dealloc()(jwk);
 }
 
@@ -1104,10 +1219,14 @@ RSA_json_field_cleanup:
 
 static bool _RSA_public_fields(const cjose_jwk_t *jwk, json_t *json, cjose_err *err)
 {
-    RSA *rsa = (RSA *)jwk->keydata;
-
     BIGNUM *rsa_n = NULL, *rsa_e = NULL, *rsa_d = NULL;
+#if defined(CJOSE_OPENSSL_3X)
+    EVP_PKEY *rsa = (EVP_PKEY *)jwk->keydata;
+    _cjose_jwk_rsa_get2(rsa, &rsa_n, &rsa_e, &rsa_d);
+#else // CJOSE_OPENSSL_3X
+    RSA *rsa = (RSA *)jwk->keydata;
     _cjose_jwk_rsa_get(rsa, &rsa_n, &rsa_e, &rsa_d);
+#endif // CJOSE_OPENSSL_3X
 
     if (!_RSA_json_field(rsa_e, "e", json, err))
     {
@@ -1117,22 +1236,26 @@ static bool _RSA_public_fields(const cjose_jwk_t *jwk, json_t *json, cjose_err *
     {
         return false;
     }
-
     return true;
 }
 
 static bool _RSA_private_fields(const cjose_jwk_t *jwk, json_t *json, cjose_err *err)
 {
-    RSA *rsa = (RSA *)jwk->keydata;
-
     BIGNUM *rsa_n = NULL, *rsa_e = NULL, *rsa_d = NULL;
-    _cjose_jwk_rsa_get(rsa, &rsa_n, &rsa_e, &rsa_d);
-
-    BIGNUM *rsa_p = NULL, *rsa_q;
-    _cjose_jwk_rsa_get_factors(rsa, &rsa_p, &rsa_q);
-
+    BIGNUM *rsa_p = NULL, *rsa_q = NULL;
     BIGNUM *rsa_dmp1 = NULL, *rsa_dmq1 = NULL, *rsa_iqmp = NULL;
+
+#if defined(CJOSE_OPENSSL_3X)
+    EVP_PKEY *rsa = (EVP_PKEY *)jwk->keydata;
+    _cjose_jwk_rsa_get2(rsa, &rsa_n, &rsa_e, &rsa_d);
+    _cjose_jwk_rsa_get_factors2(rsa, &rsa_p, &rsa_q);
+    _cjose_jwk_rsa_get_crt2(rsa, &rsa_dmp1, &rsa_dmq1, &rsa_iqmp);
+#else // CJOSE_OPENSSL_3X
+    RSA *rsa = (RSA *)jwk->keydata;
+    _cjose_jwk_rsa_get(rsa, &rsa_n, &rsa_e, &rsa_d);
+    _cjose_jwk_rsa_get_factors(rsa, &rsa_p, &rsa_q);
     _cjose_jwk_rsa_get_crt(rsa, &rsa_dmp1, &rsa_dmq1, &rsa_iqmp);
+#endif // CJOSE_OPENSSL_3X
 
     if (!_RSA_json_field(rsa_d, "d", json, err))
     {
@@ -1166,6 +1289,32 @@ static bool _RSA_private_fields(const cjose_jwk_t *jwk, json_t *json, cjose_err 
 static const uint8_t *DEFAULT_E_DAT = (const uint8_t *)"\x01\x00\x01";
 static const size_t DEFAULT_E_LEN = 3;
 
+#if defined(CJOSE_OPENSSL_3X)
+bool generate_rsa_key(EVP_PKEY **pkey, size_t keysize) {
+    bool retval = false;
+
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+    if (!ctx)
+        goto generate_rsa_key_cleanup;
+
+    if (EVP_PKEY_keygen_init(ctx) <= 0)
+        goto generate_rsa_key_cleanup;
+
+    if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, keysize) <= 0)
+        goto generate_rsa_key_cleanup;
+    
+    if (EVP_PKEY_keygen(ctx, pkey) <= 0)
+        goto generate_rsa_key_cleanup;
+
+    retval = true;
+generate_rsa_key_cleanup:
+    if (!ctx)
+        EVP_PKEY_CTX_free(ctx);
+
+    return retval;
+}
+#endif
+
 cjose_jwk_t *cjose_jwk_create_RSA_random(size_t keysize, const uint8_t *e, size_t elen, cjose_err *err)
 {
     if (0 == keysize)
@@ -1179,6 +1328,13 @@ cjose_jwk_t *cjose_jwk_create_RSA_random(size_t keysize, const uint8_t *e, size_
         elen = DEFAULT_E_LEN;
     }
 
+#if defined(CJOSE_OPENSSL_3X)
+    EVP_PKEY *pkey = NULL;
+    if (true == generate_rsa_key(&pkey, keysize)) 
+        return _RSA_new(pkey, err);
+
+    return NULL;
+#else // CJOSE_OPENSSL_3X
     RSA *rsa = NULL;
     BIGNUM *bn = NULL;
 
@@ -1215,6 +1371,7 @@ create_RSA_random_failed:
         RSA_free(rsa);
     }
     return NULL;
+#endif // CJOSE_OPENSSL_3X
 }
 
 cjose_jwk_t *cjose_jwk_create_RSA_spec(const cjose_jwk_rsa_keyspec *spec, cjose_err *err)
@@ -1233,6 +1390,88 @@ cjose_jwk_t *cjose_jwk_create_RSA_spec(const cjose_jwk_rsa_keyspec *spec, cjose_
         return NULL;
     }
 
+#if defined(CJOSE_OPENSSL_3X)
+    EVP_PKEY *pkey = NULL;
+    EVP_PKEY_CTX *pctx = NULL;
+    OSSL_PARAM params[9];
+
+    // Set up the parameter context
+    pctx = EVP_PKEY_CTX_new_from_name(NULL, "RSA", NULL);
+    if (!pctx)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_NO_MEMORY);
+        return NULL;
+    }
+
+    // Initialize the keygen context for RSA
+    if (EVP_PKEY_fromdata_init(pctx) <= 0)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_NO_MEMORY);
+        goto create_RSA_spec_failed;
+    }
+
+    // Populate the parameters array with modulus and exponent
+    // TODO: should we use similar method as in: _cjose_jwk_rsa_set_crt2 ??
+    // so that we dont need to deal with endian value?
+    cjose_reverse(spec->n, spec->nlen);
+    params[0] = OSSL_PARAM_construct_BN(OSSL_PKEY_PARAM_RSA_N, spec->n, spec->nlen);
+    cjose_reverse(spec->e, spec->elen);
+    params[1] = OSSL_PARAM_construct_BN(OSSL_PKEY_PARAM_RSA_E, spec->e, spec->elen);
+    int paramCount = 2;
+
+    if (hasPriv)
+    {
+        if (NULL != spec->d && spec->dlen > 0)
+        {
+            cjose_reverse(spec->d, spec->dlen);
+            params[paramCount] = OSSL_PARAM_construct_BN(OSSL_PKEY_PARAM_RSA_D, spec->d, spec->dlen);
+            paramCount++;
+        }
+        if (NULL != spec->p && spec->plen > 0)
+        {
+            cjose_reverse(spec->p, spec->plen);
+            params[paramCount] = OSSL_PARAM_construct_BN(OSSL_PKEY_PARAM_RSA_FACTOR1, spec->p, spec->plen);
+            paramCount++;
+        }
+        if (NULL != spec->q && spec->qlen > 0)
+        {
+            cjose_reverse(spec->q, spec->qlen);
+            params[paramCount] = OSSL_PARAM_construct_BN(OSSL_PKEY_PARAM_RSA_FACTOR2, spec->q, spec->qlen);
+            paramCount++;
+        }
+        if (NULL != spec->dp && spec->dplen > 0)
+        {
+            cjose_reverse(spec->dp, spec->dplen);
+            params[paramCount] = OSSL_PARAM_construct_BN(OSSL_PKEY_PARAM_RSA_EXPONENT1, spec->dp, spec->dplen);
+            paramCount++;
+        }
+        if (NULL != spec->dq && spec->dqlen > 0)
+        {
+            cjose_reverse(spec->dq, spec->dqlen);
+            params[paramCount] = OSSL_PARAM_construct_BN(OSSL_PKEY_PARAM_RSA_EXPONENT2, spec->dq, spec->dqlen);
+            paramCount++;
+        }
+        if (NULL != spec->qi && spec->qilen > 0)
+        {
+            cjose_reverse(spec->qi, spec->qilen);
+            params[paramCount] = OSSL_PARAM_construct_BN(OSSL_PKEY_PARAM_RSA_COEFFICIENT1, spec->qi, spec->qilen);
+            paramCount++;
+        }
+    }
+    params[paramCount] = OSSL_PARAM_construct_end();
+    EVP_PKEY_fromdata(pctx, &pkey, hasPriv? EVP_PKEY_PRIVATE_KEY:EVP_PKEY_PUBLIC_KEY, params);
+
+    return _RSA_new(pkey, err);
+
+create_RSA_spec_failed:
+    if (pkey)
+        EVP_PKEY_free(pkey);
+    if (pctx)
+        EVP_PKEY_CTX_free(pctx);
+
+    return NULL;
+
+#else // CJOSE_OPENSSL_3X
     RSA *rsa = NULL;
     rsa = RSA_new();
     if (!rsa)
@@ -1269,6 +1508,7 @@ create_RSA_spec_failed:
     }
 
     return NULL;
+#endif // CJOSE_OPENSSL_3X
 }
 
 //////////////// Import ////////////////

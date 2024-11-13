@@ -154,3 +154,19 @@ json_t *_cjose_json_stringn(const char *value, size_t len, cjose_err *err)
 #endif
     return result;
 }
+
+void cjose_reverse(uint8_t *arr, size_t size)
+{
+    int start = 0, end = size - 1;
+
+    while (start < end) {
+        // Swap elements at start and end indices
+        int temp = arr[start];
+        arr[start] = arr[end];
+        arr[end] = temp;
+
+        // Move towards the middle
+        start++;
+        end--;
+    }
+}

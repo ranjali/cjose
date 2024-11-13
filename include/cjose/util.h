@@ -173,6 +173,12 @@ cjose_dealloc3_fn_t cjose_get_dealloc3(void);
  */
 int cjose_const_memcmp(const uint8_t *a, const uint8_t *b, const size_t size);
 
+/**
+ * Reverse array order.
+ * It is used to handle little endian machine, e.g. MacOS
+ */
+void cjose_reverse(uint8_t *arr, size_t size);
+
 #ifdef __cplusplus
 }
 #endif
