@@ -515,6 +515,16 @@ static bool _cjose_jwe_decrypt_ek_dir(_jwe_int_recipient_t *recipient, cjose_jwe
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+static const EVP_CIPHER* _get_cipher_type(size_t size) {
+    switch (size) {
+        case 128: return EVP_aes_128_wrap();
+        case 192: return EVP_aes_192_wrap();
+        case 256: return EVP_aes_256_wrap();
+        default: return NULL;  // Invalid size
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
 static bool _cjose_jwe_encrypt_ek_aes_kw(_jwe_int_recipient_t *recipient, cjose_jwe_t *jwe, const cjose_jwk_t *jwk, cjose_err *err)
 {
     if (NULL == jwe || NULL == jwk)
@@ -536,28 +546,53 @@ static bool _cjose_jwe_encrypt_ek_aes_kw(_jwe_int_recipient_t *recipient, cjose_
         return false;
     }
 
-    // create the AES encryption key from the shared key
-    AES_KEY akey;
-    if (AES_set_encrypt_key(jwk->keydata, jwk->keysize, &akey) < 0)
-    {
-        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
-        return false;
-    }
-
     // allocate buffer for encrypted CEK (=cek_len + 8)
     if (!_cjose_jwe_malloc(jwe->cek_len + 8, false, &recipient->enc_key.raw, err))
     {
         return false;
     }
-
-    // AES wrap the CEK
-    int len = AES_wrap_key(&akey, NULL, recipient->enc_key.raw, jwe->cek, jwe->cek_len);
-    if (len <= 0)
-    {
+    // Create an EVP_CIPHER_CTX context
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         return false;
     }
-    recipient->enc_key.raw_len = len;
+    // Initialize the cipher context for AES key wrap
+    const EVP_CIPHER *cipher_type = _get_cipher_type(jwk->keysize);
+    if (!EVP_EncryptInit_ex(ctx, cipher_type, NULL, jwk->keydata, NULL)) {
+        
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        EVP_CIPHER_CTX_free(ctx);
+        return false;
+    }
+
+    // Perform the encryption
+    int len = 0;
+    if (jwe->cek_len > INT_MAX)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        EVP_CIPHER_CTX_free(ctx);
+        return false;
+    }
+    if (EVP_EncryptUpdate(ctx, recipient->enc_key.raw, &len, jwe->cek, (int)jwe->cek_len) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        EVP_CIPHER_CTX_free(ctx);
+        return false;
+    }
+    int final_len = 0;
+    if (EVP_EncryptFinal_ex(ctx, recipient->enc_key.raw, &final_len) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        EVP_CIPHER_CTX_free(ctx);
+        return false;
+    }
+    // len += EVP_EncryptFinal_ex(ctx, recipient->enc_key.raw + len, &len);
+
+    recipient->enc_key.raw_len = len + final_len;
+
+    // Clean up
+    EVP_CIPHER_CTX_free(ctx);
 
     return true;
 }
@@ -578,29 +613,52 @@ static bool _cjose_jwe_decrypt_ek_aes_kw(_jwe_int_recipient_t *recipient, cjose_
         return false;
     }
 
-    // create the AES decryption key from the shared key
-    AES_KEY akey;
-    if (AES_set_decrypt_key(jwk->keydata, jwk->keysize, &akey) < 0)
-    {
-        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
-        return false;
-    }
-
     if (!jwe->fns.set_cek(jwe, NULL, false, err))
     {
         return false;
     }
-
-    // AES unwrap the CEK in to jwe->cek
-    int len = AES_unwrap_key(&akey, (const unsigned char *)NULL, jwe->cek, (const unsigned char *)recipient->enc_key.raw,
-                             recipient->enc_key.raw_len);
-    if (len <= 0)
-    {
+    
+    // Create an EVP_CIPHER_CTX context
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         return false;
     }
-    jwe->cek_len = len;
+    const EVP_CIPHER *cipher_type = _get_cipher_type(jwk->keysize);
+    // Initialize the cipher context for AES key unwrap
+    if (!EVP_DecryptInit_ex(ctx, cipher_type, NULL, jwk->keydata, NULL)) {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        EVP_CIPHER_CTX_free(ctx);
+        return false;
+    }
 
+    // Perform the decryption
+    int len = 0;  // Use int for length
+    if (recipient->enc_key.raw_len > INT_MAX)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        EVP_CIPHER_CTX_free(ctx);
+        return false;
+    }
+    if (EVP_DecryptUpdate(ctx, jwe->cek, &len, recipient->enc_key.raw, (int)recipient->enc_key.raw_len) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        EVP_CIPHER_CTX_free(ctx);
+        return false;
+    }
+    int final_len = 0;
+    if (EVP_DecryptFinal_ex(ctx, jwe->cek + len, &final_len) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        EVP_CIPHER_CTX_free(ctx);
+        return false;
+    }
+
+    jwe->cek_len = len + final_len;
+
+    // Clean up
+    EVP_CIPHER_CTX_free(ctx);
+    
     return true;
 }
 
