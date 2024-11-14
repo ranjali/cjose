@@ -340,7 +340,6 @@ static bool _cjose_jws_build_dig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *j
     }
 
     // Finalize the HMAC and get the result
-    // TODO: should check length again here to make sure it is similar with expected
     if (EVP_MAC_final(mac_ctx, jws->dig, &jws->dig_len, jws->dig_len) <= 0)
     {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);

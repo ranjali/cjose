@@ -55,6 +55,7 @@ typedef struct _ec_keydata_int
 // RSA-specific keydata = OpenSSL RSA struct
 // (just uses RSA struct)
 void _cjose_jwk_rsa_get(RSA *rsa, BIGNUM **n, BIGNUM **e, BIGNUM **d);
+bool _cjose_jwk_rsa_get2(EVP_PKEY *rsa, BIGNUM **n, BIGNUM **e, BIGNUM **d);
 
 bool cjose_jwk_derive_ecdh_bits(
     const cjose_jwk_t *jwk_self, const cjose_jwk_t *jwk_peer, uint8_t **output, size_t *output_len, cjose_err *err);

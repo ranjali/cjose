@@ -605,6 +605,40 @@ static bool _cjose_jwe_decrypt_ek_aes_kw(_jwe_int_recipient_t *recipient, cjose_
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+static bool _cjose_jwe_encrypt_cek(const unsigned char *cek, size_t cek_len, EVP_PKEY *pkey, 
+                    unsigned char *encrypted_key, size_t *encrypted_key_len, int padding)
+{
+    EVP_PKEY_CTX *ctx = NULL;
+    bool success = false;
+
+    // Create a context for the encryption operation
+    ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!ctx)
+        goto _cjose_encrypt_cek_cleanup;
+
+    // Initialize the encryption operation
+    if (EVP_PKEY_encrypt_init(ctx) <= 0)
+        goto _cjose_encrypt_cek_cleanup;
+
+    // Set the padding mode
+    if (EVP_PKEY_CTX_set_rsa_padding(ctx, padding) <= 0)
+        goto _cjose_encrypt_cek_cleanup;
+
+    // Determine the buffer length for encrypted data
+    if (EVP_PKEY_encrypt(ctx, NULL, encrypted_key_len, cek, cek_len) <= 0)
+        goto _cjose_encrypt_cek_cleanup;
+
+    // Encrypt the CEK
+    if (EVP_PKEY_encrypt(ctx, encrypted_key, encrypted_key_len, cek, cek_len) <= 0)
+        goto _cjose_encrypt_cek_cleanup;
+
+    success = true;
+
+_cjose_encrypt_cek_cleanup:
+    EVP_PKEY_CTX_free(ctx);
+    return success;
+}
+
 static bool _cjose_jwe_encrypt_ek_rsa_padding(
     _jwe_int_recipient_t *recipient, cjose_jwe_t *jwe, const cjose_jwk_t *jwk, int padding, cjose_err *err)
 {
@@ -617,7 +651,11 @@ static bool _cjose_jwe_encrypt_ek_rsa_padding(
 
     // jwk must have the necessary public parts set
     BIGNUM *rsa_n = NULL, *rsa_e = NULL, *rsa_d = NULL;
+#if defined(CJOSE_OPENSSL_3X)
+    _cjose_jwk_rsa_get2((EVP_PKEY *)jwk->keydata, &rsa_n, &rsa_e, &rsa_d);
+#else // CJOSE_OPENSSL_3X
     _cjose_jwk_rsa_get((RSA *)jwk->keydata, &rsa_n, &rsa_e, &rsa_d);
+#endif // CJOSE_OPENSSL_3X
     if (NULL == rsa_e || NULL == rsa_n)
     {
         CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
@@ -631,8 +669,11 @@ static bool _cjose_jwe_encrypt_ek_rsa_padding(
     }
 
     // the size of the ek will match the size of the RSA key
+#if defined(CJOSE_OPENSSL_3X)
+    recipient->enc_key.raw_len = EVP_PKEY_size((EVP_PKEY *)jwk->keydata);
+#else // CJOSE_OPENSSL_3X
     recipient->enc_key.raw_len = RSA_size((RSA *)jwk->keydata);
-
+#endif // CJOSE_OPENSSL_3X
     // for OAEP padding - the RSA size - 41 must be greater than input
     if (jwe->cek_len >= recipient->enc_key.raw_len - 41)
     {
@@ -657,17 +698,62 @@ static bool _cjose_jwe_encrypt_ek_rsa_padding(
 #endif // HAVE_RSA_PKCS1_PADDING
 
     // encrypt the CEK using RSA v1.5 or OAEP padding
+#if defined(CJOSE_OPENSSL_3X)
+    if (true != _cjose_jwe_encrypt_cek(jwe->cek, jwe->cek_len, (EVP_PKEY*)jwk->keydata, 
+                        recipient->enc_key.raw, &recipient->enc_key.raw_len, padding))
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        return false;
+    }
+
+#else // CJOSE_OPENSSL_3X
+
     if (RSA_public_encrypt(jwe->cek_len, jwe->cek, recipient->enc_key.raw, (RSA *)jwk->keydata, padding)
         != recipient->enc_key.raw_len)
     {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         return false;
     }
+#endif // CJOSE_OPENSSL_3X
 
     return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+static bool _cjose_jwe_decrypt_cek(const unsigned char *encrypted_key, size_t encrypted_key_len, EVP_PKEY *pkey, 
+                        unsigned char *cek, size_t *cek_len, int padding)
+{
+    EVP_PKEY_CTX *ctx = NULL;
+    bool success = false;
+
+    // Create a context for the decryption operation
+    ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!ctx)
+        goto _cjose_decrypt_cek_cleanup;
+
+    // Initialize the decryption operation
+    if (EVP_PKEY_decrypt_init(ctx) <= 0)
+        goto _cjose_decrypt_cek_cleanup;
+
+    // Set the padding mode
+    if (EVP_PKEY_CTX_set_rsa_padding(ctx, padding) <= 0)
+        goto _cjose_decrypt_cek_cleanup;
+
+    // Determine the buffer length for decrypted data
+    if (EVP_PKEY_decrypt(ctx, NULL, cek_len, encrypted_key, encrypted_key_len) <= 0)
+        goto _cjose_decrypt_cek_cleanup;
+
+    // Decrypt the CEK
+    if (EVP_PKEY_decrypt(ctx, cek, cek_len, encrypted_key, encrypted_key_len) <= 0)
+        goto _cjose_decrypt_cek_cleanup;
+
+    success = true;
+
+_cjose_decrypt_cek_cleanup:
+    EVP_PKEY_CTX_free(ctx);
+    return success;
+}
+
 static bool _cjose_jwe_decrypt_ek_rsa_padding(
     _jwe_int_recipient_t *recipient, cjose_jwe_t *jwe, const cjose_jwk_t *jwk, int padding, cjose_err *err)
 {
@@ -686,7 +772,13 @@ static bool _cjose_jwe_decrypt_ek_rsa_padding(
 
     // jwk must have the necessary private parts set
     BIGNUM *rsa_n = NULL, *rsa_e = NULL, *rsa_d = NULL;
+#if defined(CJOSE_OPENSSL_3X)
+    _cjose_jwk_rsa_get2((EVP_PKEY *)jwk->keydata, &rsa_n, &rsa_e, &rsa_d);
+    size_t buflen = EVP_PKEY_size((EVP_PKEY *)jwk->keydata);
+#else // CJOSE_OPENSSL_3X
     _cjose_jwk_rsa_get((RSA *)jwk->keydata, &rsa_n, &rsa_e, &rsa_d);
+    size_t buflen = RSA_size((RSA *)jwk->keydata);
+#endif // CJOSE_OPENSSL_3X
     if (NULL == rsa_e || NULL == rsa_n || NULL == rsa_d)
     {
         CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
@@ -695,7 +787,6 @@ static bool _cjose_jwe_decrypt_ek_rsa_padding(
 
     // we don't know the size of the key to expect, but must be < RSA_size
     _cjose_release_cek(&jwe->cek, jwe->cek_len);
-    size_t buflen = RSA_size((RSA *)jwk->keydata);
     if (!_cjose_jwe_malloc(buflen, false, &jwe->cek, err))
     {
         return false;
@@ -711,8 +802,18 @@ static bool _cjose_jwe_decrypt_ek_rsa_padding(
     }
 #endif // HAVE_RSA_PKCS1_PADDING
 
+#if defined(CJOSE_OPENSSL_3X)
+    size_t len = 0;
+    if (true != _cjose_jwe_decrypt_cek(recipient->enc_key.raw, recipient->enc_key.raw_len, (EVP_PKEY*)jwk->keydata, jwe->cek, &len, padding))
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        return false;
+    }
+
+#else // CJOSE_OPENSSL_3X
     // decrypt the CEK using RSA v1.5 or OAEP padding
     int len = RSA_private_decrypt(recipient->enc_key.raw_len, recipient->enc_key.raw, jwe->cek, (RSA *)jwk->keydata, padding);
+#endif // CJOSE_OPENSSL_3X
     if (-1 == len)
     {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
